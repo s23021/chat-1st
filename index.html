@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>グループチャットアプリ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        font-family: 'Inter', sans-serif; /* A nice default font */
+      }
+       /* Smooth scrolling for chat */
+      .smooth-scroll {
+        scroll-behavior: smooth;
+      }
+      /* Custom animation for elements that should bounce three times */
+      .animate-bounce-thrice > div {
+        animation-iteration-count: 3; /* Tailwind's animate-bounce is infinite by default, this would make it 3 if ever used */
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/client": "https://esm.sh/react-dom@^19.1.0/client",
+    "@google/genai": "https://esm.sh/@google/genai@^1.0.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "react/": "https://esm.sh/react@^19.1.0/"
+  }
+}
+</script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel" data-type="module">
+// Main React import
+import React from 'react'; 
+
+// From types.ts
+interface ChatMessage {
+  id: string;
+  sender: string; 
+  timestamp: number;
+  isUserMessage: boolean; 
+  messageType: 'text' | 'image';
+  text?: string | null; 
+  fileUrl?: string | null; 
+  fileName?: string | null; 
+}
+
+interface UserCredentials {
+  password?: string;
+  profileImageUrl?: string | null; 
+}
+
+// From components/icons/UserIcon.tsx
+const UserIcon = (props) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+  </svg>
+);
+
+// From components/icons/SendIcon.tsx
+const SendIcon = (props) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+  </svg>
+);
+
+// From components/icons/ProfileIcon.tsx
+const ProfileIcon = (props) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+    <path d="M0 0h24v24H0z" fill="none"/>
+  </svg>
+);
+
+// From components/icons/ImageIcon.tsx
+const ImageIcon = (props) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+    <path d="M0 0h24v24H0z" fill="none"/>
+  </svg>
+);
+
+// From components/icons/CloseIcon.tsx
+const CloseIcon = (props) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
+    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+    <path d="M0 0h24v24H0z" fill="none"/>
+  </svg>
+);
+
+// From components/MessageBubble.tsx
+const MessageBubble = ({ message, currentUser, senderProfileImageUrl, onDeleteMessage }) => {
+  const isOwnMessage = message.sender === currentUser && message.isUserMessage;
+  const isSystemMessage = message.sender === 'System';
+
+  const formatTimestamp = (timestamp) => {
+    return new Date(timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const handleDeleteClick = () => {
+    if (!isOwnMessage || isSystemMessage) return;
+    // Confirmation dialog before deleting
+    if (window.confirm('このメッセージを削除しますか？')) {
+      onDeleteMessage(message.id);
+    }
+  };
+
+  const renderAvatar = (sizeClass = "w-8 h-8") => {
+    if (senderProfileImageUrl) {
+      return (
+        <img 
+          src={senderProfileImageUrl} 
+          alt={`${message.sender}のプロフィール画像`} 
+          className={`${sizeClass} rounded-full object-cover border border-slate-500`}
+          title={message.sender}
+        />
+      );
+    }
+    if (message.sender && message.sender !== 'System' && message.isUserMessage) {
+        const initial = message.sender.charAt(0).toUpperCase();
+        return (
+             <div 
+                className={`${sizeClass} rounded-full bg-slate-600 flex items-center justify-center text-indigo-300 font-semibold`} 
+                title={message.sender}
+            >
+                {initial || <UserIcon className="w-5 h-5" />}
+            </div>
+        );
+    }
+    return (
+        <div 
+            className={`${sizeClass} rounded-full bg-slate-600 flex items-center justify-center text-sky-300`} 
+            title={message.sender}
+        >
+            <UserIcon className="w-5 h-5" />
+        </div>
+    );
+  };
+
+  const renderMessageContent = () => {
+    switch (message.messageType) {
+      case 'image':
+        return (
+          <div className="mt-1">
+            {message.text && <p className="text-sm whitespace-pre-wrap break-words mb-2">{message.text}</p>}
+            <img 
+              src={message.fileUrl} 
+              alt={message.fileName || message.text || '添付画像'} 
+              className="max-w-full h-auto max-h-64 md:max-h-80 rounded-lg object-contain border border-slate-600"
+              onClick={(e) => {
+                e.stopPropagation(); 
+                window.open(message.fileUrl, '_blank');
+              }}
+              style={{ cursor: 'pointer' }} 
+              aria-label={`画像: ${message.fileName || message.text || '添付画像'}`}
+            />
+             {message.fileName && message.fileName !== message.text && !message.text?.includes(message.fileName) &&
+                <p className="text-xs text-slate-400 mt-1 italic">ファイル名: {message.fileName}</p>
+             }
+          </div>
+        );
+      case 'text':
+      default:
+        return <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>;
+    }
+  };
+
+  if (isSystemMessage) {
+    return (
+      <div className="flex justify-center my-2">
+        <div className="px-3 py-1.5 text-xs text-slate-400 bg-slate-700 rounded-full shadow">
+          {message.text}
+        </div>
+      </div>
+    );
+  }
+  
+  const messageBubbleBaseClasses = "max-w-[70%] sm:max-w-xs md:max-w-md lg:max-w-lg xl:max-w-xl p-3 rounded-xl shadow";
+  const ownMessageClasses = 'bg-sky-600 text-white rounded-br-none cursor-pointer'; 
+  const otherMessageClasses = 'bg-slate-700 text-slate-100 rounded-bl-none';
+
+  return (
+    <div className={`flex items-end space-x-2 sm:space-x-3 ${isOwnMessage ? 'justify-end' : 'justify-start'}`}>
+      {!isOwnMessage && (
+        <div className="flex-shrink-0 self-start pt-1">
+          {renderAvatar()}
+        </div>
+      )}
+      <div
+        className={`${messageBubbleBaseClasses} ${
+          isOwnMessage ? ownMessageClasses : otherMessageClasses
+        }`}
+        onClick={isOwnMessage ? handleDeleteClick : undefined} 
+        role={isOwnMessage ? "button" : undefined} 
+        aria-label={isOwnMessage ? `自分のメッセージ: ${message.text || (message.messageType === 'image' ? (message.fileName || '画像') : '')}。タップまたはEnterで削除` : undefined}
+        tabIndex={isOwnMessage ? 0 : undefined} 
+        onKeyDown={(e) => {
+            if (isOwnMessage && (e.key === 'Enter' || e.key === ' ')) {
+                e.preventDefault(); 
+                handleDeleteClick();
+            }
+        }}
+      >
+        {!isOwnMessage && (
+            <p className="text-xs font-semibold text-indigo-300 mb-1">{message.sender}</p>
+        )}
+        {renderMessageContent()}
+        <p className={`text-xs mt-1 ${isOwnMessage ? 'text-sky-200' : 'text-slate-400'} text-right`}>
+          {formatTimestamp(message.timestamp)}
+        </p>
+      </div>
+      {isOwnMessage && (
+         <div className="flex-shrink-0 self-start pt-1">
+           {renderAvatar()}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// From components/LoginScreen.tsx
+const LoginScreen = ({ onLogin, validateCredentials }) => {
+  const [accountName, setAccountName] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [error, setError] = React.useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!accountName.trim() || !password.trim()) {
+      setError('アカウント名とパスワードを入力してください。');
+      return;
+    }
+
+    if (validateCredentials(accountName, password)) {
+      setError('');
+      onLogin(accountName);
+    } else {
+      setError('アカウント名またはパスワードが正しくありません。');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex flex-col justify-center items-center p-4">
+      <div className="bg-slate-800 shadow-2xl rounded-xl p-8 md:p-12 w-full max-w-md border border-slate-700">
+        <h1 className="text-4xl font-bold text-center text-sky-400 mb-8">
+          グループチャットへようこそ
+        </h1>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div>
+            <label
+              htmlFor="accountName"
+              className="block text-sm font-medium text-slate-300 mb-1"
+            >
+              アカウント名
+            </label>
+            <input
+              type="text"
+              id="accountName"
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+              placeholder="例: user1"
+              className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-colors"
+              aria-required="true"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="password"
+              className="block text-sm font-medium text-slate-300 mb-1"
+            >
+              パスワード
+            </label>
+            <input
+              type="password"
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="********"
+              className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-colors"
+              aria-required="true"
+            />
+          </div>
+          {error && <p className="text-sm text-red-400 text-center" role="alert">{error}</p>}
+          <button
+            type="submit"
+            className="w-full bg-sky-500 hover:bg-sky-600 text-white font-semibold py-3 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition-colors duration-150 ease-in-out"
+          >
+            ログイン
+          </button>
+        </form>
+      </div>
+      <footer className="text-center text-slate-500 mt-8 text-sm">
+        <p>&copy; {new Date().getFullYear()} グループチャットアプリ.</p>
+      </footer>
+    </div>
+  );
+};
+
+// From components/ProfileScreen.tsx
+const MAX_FILE_SIZE_MB_PROFILE = 2;
+const MAX_FILE_SIZE_BYTES_PROFILE = MAX_FILE_SIZE_MB_PROFILE * 1024 * 1024;
+
+const ProfileScreen = ({
+  currentUser,
+  currentPassword,
+  currentProfileImageUrl,
+  onChangePassword,
+  onChangeProfileImage,
+  onNavigateToChat,
+}) => {
+  const [oldPassword, setOldPassword] = React.useState('');
+  const [newPassword, setNewPassword] = React.useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = React.useState('');
+  const [passwordError, setPasswordError] = React.useState('');
+  const [passwordSuccessMessage, setPasswordSuccessMessage] = React.useState('');
+
+  const [imageError, setImageError] = React.useState('');
+  const [imageSuccessMessage, setImageSuccessMessage] = React.useState('');
+  const [imagePreviewUrl, setImagePreviewUrl] = React.useState(currentProfileImageUrl || null);
+  const fileInputRef = React.useRef(null);
+
+
+  const handlePasswordSubmit = (e) => {
+    e.preventDefault();
+    setPasswordError('');
+    setPasswordSuccessMessage('');
+
+    if (!oldPassword || !newPassword || !confirmNewPassword) {
+      setPasswordError('すべてのパスワードフィールドを入力してください。');
+      return;
+    }
+    if (oldPassword !== currentPassword) {
+      setPasswordError('現在のパスワードが正しくありません。');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordError('新しいパスワードと確認用パスワードが一致しません。');
+      return;
+    }
+    if (newPassword.length < 4) {
+        setPasswordError('新しいパスワードは4文字以上で入力してください。');
+        return;
+    }
+    if (oldPassword === newPassword) {
+        setPasswordError('新しいパスワードが現在のパスワードと同じです。変更する場合は異なるパスワードを入力してください。');
+        return;
+    }
+
+    const success = onChangePassword(currentUser, newPassword);
+    if (success) {
+      setPasswordSuccessMessage('パスワードが正常に変更されました。');
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+    } else {
+      setPasswordError('パスワードの変更に失敗しました。もう一度お試しください。');
+    }
+  };
+
+  const handleImageFileChange = (event) => {
+    setImageError('');
+    setImageSuccessMessage('');
+    const file = event.target.files?.[0];
+
+    if (file) {
+      if (file.size > MAX_FILE_SIZE_BYTES_PROFILE) {
+        setImageError(`ファイルサイズは${MAX_FILE_SIZE_MB_PROFILE}MB以下にしてください。`);
+        if(fileInputRef.current) fileInputRef.current.value = ""; 
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        setImageError('画像ファイル（JPEG, PNG, GIFなど）を選択してください。');
+        if(fileInputRef.current) fileInputRef.current.value = ""; 
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const resultStr = reader.result;
+        setImagePreviewUrl(resultStr); 
+        onChangeProfileImage(currentUser, resultStr);
+        setImageSuccessMessage('プロフィール画像が更新されました。');
+      };
+      reader.onerror = () => {
+        setImageError('画像の読み込みに失敗しました。');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setImageError('');
+    setImageSuccessMessage('');
+    onChangeProfileImage(currentUser, null);
+    setImagePreviewUrl(null);
+    if(fileInputRef.current) fileInputRef.current.value = ""; 
+    setImageSuccessMessage('プロフィール画像が削除されました。');
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex flex-col justify-center items-center p-4 py-8">
+      <div className="bg-slate-800 shadow-2xl rounded-xl p-6 md:p-10 w-full max-w-lg border border-slate-700">
+        <h1 className="text-3xl font-bold text-center text-sky-400 mb-2">
+          プロフィール設定
+        </h1>
+        <p className="text-center text-slate-400 mb-6">ユーザー: {currentUser}</p>
+
+        <div className="mb-8 border-b border-slate-700 pb-8">
+            <h2 className="text-xl font-semibold text-sky-300 mb-4">プロフィール画像</h2>
+            <div className="flex flex-col items-center space-y-4">
+                <div className="w-32 h-32 rounded-full bg-slate-700 flex items-center justify-center overflow-hidden border-2 border-slate-600">
+                    {imagePreviewUrl ? (
+                        <img src={imagePreviewUrl} alt="プロフィール画像プレビュー" className="w-full h-full object-cover" />
+                    ) : (
+                        <UserIcon className="w-20 h-20 text-slate-500" />
+                    )}
+                </div>
+                <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageFileChange}
+                    ref={fileInputRef}
+                    id="profileImageInput"
+                    className="hidden" 
+                    aria-label="プロフィール画像を選択"
+                />
+                <label
+                    htmlFor="profileImageInput"
+                    className="cursor-pointer bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-colors text-sm"
+                >
+                    画像を選択
+                </label>
+                {currentProfileImageUrl && (
+                    <button
+                        onClick={handleRemoveImage}
+                        className="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded-lg transition-colors text-sm"
+                    >
+                        画像を削除
+                    </button>
+                )}
+                {imageError && <p className="text-sm text-red-400 text-center" role="alert">{imageError}</p>}
+                {imageSuccessMessage && <p className="text-sm text-green-400 text-center" role="status">{imageSuccessMessage}</p>}
+            </div>
+        </div>
+
+        <div>
+            <h2 className="text-xl font-semibold text-sky-300 mb-4">パスワード変更</h2>
+            <form onSubmit={handlePasswordSubmit} className="space-y-5">
+            <div>
+                <label
+                htmlFor="oldPassword"
+                className="block text-sm font-medium text-slate-300 mb-1"
+                >
+                現在のパスワード
+                </label>
+                <input
+                type="password"
+                id="oldPassword"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-colors"
+                aria-required="true"
+                />
+            </div>
+            <div>
+                <label
+                htmlFor="newPassword"
+                className="block text-sm font-medium text-slate-300 mb-1"
+                >
+                新しいパスワード
+                </label>
+                <input
+                type="password"
+                id="newPassword"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-colors"
+                aria-required="true"
+                aria-describedby="newPasswordHelp"
+                />
+                <p id="newPasswordHelp" className="mt-1 text-xs text-slate-400">4文字以上で入力してください。</p>
+            </div>
+            <div>
+                <label
+                htmlFor="confirmNewPassword"
+                className="block text-sm font-medium text-slate-300 mb-1"
+                >
+                新しいパスワード（確認用）
+                </label>
+                <input
+                type="password"
+                id="confirmNewPassword"
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-colors"
+                aria-required="true"
+                />
+            </div>
+            {passwordError && <p className="text-sm text-red-400 text-center" role="alert">{passwordError}</p>}
+            {passwordSuccessMessage && <p className="text-sm text-green-400 text-center" role="status">{passwordSuccessMessage}</p>}
+            <button
+                type="submit"
+                className="w-full bg-sky-500 hover:bg-sky-600 text-white font-semibold py-3 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition-colors duration-150 ease-in-out"
+            >
+                パスワードを変更
+            </button>
+            </form>
+        </div>
+        
+        <button
+            onClick={onNavigateToChat}
+            className="mt-8 w-full bg-slate-600 hover:bg-slate-500 text-slate-200 font-medium py-3 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition-colors"
+        >
+            チャットに戻る
+        </button>
+      </div>
+       <footer className="text-center text-slate-500 mt-8 text-sm">
+        <p>&copy; {new Date().getFullYear()} グループチャットアプリ.</p>
+      </footer>
+    </div>
+  );
+};
+
+// From components/ChatRoom.tsx
+const MAX_CHAT_FILE_SIZE_MB = 5;
+const MAX_CHAT_FILE_SIZE_BYTES = MAX_CHAT_FILE_SIZE_MB * 1024 * 1024;
+
+const ChatRoom = ({ 
+  currentUser, 
+  usersData, 
+  messages, 
+  onSendMessage, 
+  onLogout, 
+  onNavigateToProfile,
+  onDeleteMessage 
+}) => {
+  const [newMessageText, setNewMessageText] = React.useState('');
+  const [selectedImage, setSelectedImage] = React.useState(null); 
+  const [fileError, setFileError] = React.useState(null);
+  
+  const messagesEndRef = React.useRef(null);
+  const textInputRef = React.useRef(null);
+  const imageInputRef = React.useRef(null);
+
+  const currentUserProfileImageUrl = usersData[currentUser]?.profileImageUrl;
+
+  React.useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  React.useEffect(() => {
+    textInputRef.current?.focus();
+  }, []);
+
+  const handleImageFileChange = (event) => {
+    setFileError(null);
+    setSelectedImage(null); 
+    const file = event.target.files?.[0];
+
+    if (file) {
+      if (file.size > MAX_CHAT_FILE_SIZE_BYTES) {
+        setFileError(`ファイルサイズは${MAX_CHAT_FILE_SIZE_MB}MB以下にしてください。`);
+        if (imageInputRef.current) imageInputRef.current.value = "";
+        return;
+      }
+      
+      if (!file.type.startsWith('image/')) {
+        setFileError('画像ファイルを選択してください。');
+        if (imageInputRef.current) imageInputRef.current.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const resultStr = reader.result; 
+        setSelectedImage({ url: resultStr, name: file.name, file });
+      };
+      reader.onerror = () => {
+        setFileError('画像の読み込みに失敗しました。');
+        if (imageInputRef.current) imageInputRef.current.value = "";
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleRemoveSelectedImage = () => {
+    setSelectedImage(null);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = ""; 
+    }
+    textInputRef.current?.focus();
+  };
+  
+  const handleSendMessageClick = React.useCallback(() => {
+    if (!selectedImage && !newMessageText.trim()) return; 
+    setFileError(null);
+
+    if (selectedImage) {
+      onSendMessage({
+        messageType: 'image',
+        text: newMessageText.trim(), 
+        fileUrl: selectedImage.url,
+        fileName: selectedImage.name,
+      });
+    } else if (newMessageText.trim()) {
+      onSendMessage({
+        messageType: 'text',
+        text: newMessageText.trim(),
+      });
+    }
+
+    setNewMessageText('');
+    setSelectedImage(null);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
+    textInputRef.current?.focus();
+  }, [newMessageText, onSendMessage, selectedImage]);
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessageClick();
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-slate-100">
+      <header className="bg-slate-800/50 backdrop-blur-md shadow-md p-4 flex justify-between items-center border-b border-slate-700">
+        <h1 className="text-xl font-semibold text-sky-400">グループチャット</h1>
+        <div className="flex items-center space-x-3">
+          {currentUserProfileImageUrl ? (
+            <img src={currentUserProfileImageUrl} alt={`${currentUser}のプロフィール画像`} className="w-8 h-8 rounded-full object-cover border-2 border-sky-500"/>
+          ) : (
+            <UserIcon className="w-7 h-7 text-slate-400 rounded-full bg-slate-700 p-1" />
+          )}
+          <span className="text-sm text-slate-300 hidden sm:inline">ようこそ、{currentUser}さん</span>
+          <button
+            onClick={onNavigateToProfile}
+            className="p-2 rounded-full hover:bg-slate-700 transition-colors"
+            title="プロフィール設定"
+            aria-label="プロフィール設定を開く"
+          >
+            <ProfileIcon className="w-6 h-6 text-slate-400 hover:text-sky-400" />
+          </button>
+          <button
+            onClick={onLogout}
+            className="bg-red-500 hover:bg-red-600 text-white text-sm font-medium py-2 px-3 rounded-lg transition-colors"
+          >
+            ログアウト
+          </button>
+        </div>
+      </header>
+
+      <main className="flex-grow overflow-y-auto p-4 md:p-6 space-y-4 smooth-scroll" aria-live="polite">
+        {messages.map((msg) => (
+          <MessageBubble 
+            key={msg.id} 
+            message={msg} 
+            currentUser={currentUser}
+            senderProfileImageUrl={usersData[msg.sender]?.profileImageUrl || null}
+            onDeleteMessage={onDeleteMessage} 
+          />
+        ))}
+        <div ref={messagesEndRef} />
+      </main>
+
+      <footer className="bg-slate-800/50 backdrop-blur-md p-4 md:p-6 border-t border-slate-700">
+        {fileError && <p className="text-sm text-red-400 text-center mb-2" role="alert">{fileError}</p>}
+        
+        {selectedImage && (
+          <div className="mb-2 p-2 bg-slate-700 rounded-lg flex items-start justify-between">
+            <div className="flex items-start space-x-2">
+              <img src={selectedImage.url} alt="選択された画像プレビュー" className="w-16 h-16 object-cover rounded border border-slate-600" />
+              <div className="text-xs text-slate-300">
+                <p className="font-medium break-all">{selectedImage.name}</p>
+                <p>{(selectedImage.file.size / 1024).toFixed(1)} KB</p>
+              </div>
+            </div>
+            <button
+              onClick={handleRemoveSelectedImage}
+              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-600 rounded-full"
+              title="画像を削除"
+              aria-label="選択した画像を削除"
+            >
+              <CloseIcon className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          <input
+            type="file"
+            accept="image/*"
+            ref={imageInputRef}
+            onChange={handleImageFileChange}
+            className="hidden"
+            aria-label="画像ファイルを選択"
+          />
+           <button
+            onClick={() => imageInputRef.current?.click()}
+            className="p-3 rounded-lg hover:bg-slate-700 transition-colors"
+            title="画像を添付"
+            aria-label="画像を添付"
+          >
+            <ImageIcon className="w-6 h-6 text-slate-400 hover:text-sky-400" />
+          </button>
+          
+          <input
+            ref={textInputRef}
+            type="text"
+            value={newMessageText}
+            onChange={(e) => setNewMessageText(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder={selectedImage ? "画像のキャプションを入力..." : "メッセージを入力..."}
+            className="flex-grow px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-slate-100 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-colors"
+            aria-label="チャットメッセージまたは画像キャプション入力"
+          />
+          <button
+            onClick={handleSendMessageClick}
+            disabled={!newMessageText.trim() && !selectedImage}
+            className="bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition-colors"
+            aria-label="メッセージを送信"
+          >
+            <SendIcon className="w-6 h-6" />
+          </button>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+
+// From App.tsx
+let globalMessages = []; 
+
+const initialUsers = {
+  user1: { password: 'pass1', profileImageUrl: null },
+  friend1: { password: 'pass_friend1', profileImageUrl: null },
+  friend2: { password: 'pass_friend2', profileImageUrl: null },
+};
+
+const App = () => {
+  const [users, setUsers] = React.useState(initialUsers);
+  const [currentUser, setCurrentUser] = React.useState(null);
+  const [messages, setMessages] = React.useState(globalMessages);
+  const [currentView, setCurrentView] = React.useState('login');
+
+  const handleLogin = (username) => {
+    setCurrentUser(username);
+    setCurrentView('chat');
+    
+    const joinMessage = {
+        id: `system-${Date.now()}-${username}-join`,
+        text: `${username}さんが参加しました。`,
+        sender: 'System',
+        timestamp: Date.now(),
+        isUserMessage: false,
+        messageType: 'text',
+    };
+    
+    const lastGlobalMessage = globalMessages.length > 0 ? globalMessages[globalMessages.length - 1] : null;
+    if (!lastGlobalMessage || !(lastGlobalMessage.sender === 'System' && lastGlobalMessage.text === joinMessage.text)) {
+        globalMessages.push(joinMessage);
+    }
+    setMessages([...globalMessages]); 
+  };
+
+  const handleLogout = () => {
+    if (currentUser) {
+        const leaveMessage = {
+            id: `system-${Date.now()}-${currentUser}-leave`,
+            text: `${currentUser}さんが退出しました。`,
+            sender: 'System',
+            timestamp: Date.now(),
+            isUserMessage: false,
+            messageType: 'text',
+        };
+        const lastGlobalMessage = globalMessages.length > 0 ? globalMessages[globalMessages.length - 1] : null;
+        if (!lastGlobalMessage || !(lastGlobalMessage.sender === 'System' && lastGlobalMessage.text === leaveMessage.text)) {
+             globalMessages.push(leaveMessage);
+        }
+        setMessages([...globalMessages]);
+    }
+    setCurrentUser(null);
+    setCurrentView('login');
+  };
+
+  const handleSendMessage = React.useCallback((params) => {
+    if (!currentUser) return;
+
+    const newMessage = {
+      id: `${Date.now()}-${currentUser}-${params.messageType}`,
+      sender: currentUser,
+      timestamp: Date.now(),
+      isUserMessage: true, 
+      messageType: params.messageType,
+      text: params.text || (params.messageType === 'image' && !params.text ? params.fileName || '画像' : ''),
+      fileUrl: params.messageType === 'image' ? params.fileUrl : null,
+      fileName: params.messageType === 'image' ? params.fileName : null,
+    };
+    globalMessages.push(newMessage);
+    setMessages([...globalMessages]); 
+  }, [currentUser]);
+
+  const handleDeleteMessage = React.useCallback((messageId) => {
+    const messageToDelete = globalMessages.find(msg => msg.id === messageId);
+
+    if (!messageToDelete || messageToDelete.sender !== currentUser || messageToDelete.sender === 'System') {
+      return;
+    }
+    globalMessages = globalMessages.filter(msg => msg.id !== messageId);
+    setMessages([...globalMessages]); 
+  }, [currentUser]);
+
+
+  const navigateToProfile = () => {
+    setCurrentView('profile');
+  };
+
+  const navigateToChat = () => {
+    setCurrentView('chat');
+  };
+
+  const handleChangePassword = (username, newPassword) => {
+    setUsers(prevUsers => ({
+      ...prevUsers,
+      [username]: { ...prevUsers[username], password: newPassword }
+    }));
+    return true; 
+  };
+
+  const handleChangeProfileImage = (username, imageUrl) => {
+    setUsers(prevUsers => ({
+      ...prevUsers,
+      [username]: { ...prevUsers[username], profileImageUrl: imageUrl }
+    }));
+  };
+
+  const validateCredentials = (username, pass) => {
+    return users[username]?.password === pass;
+  };
+
+
+  if (currentView === 'login') {
+    return <LoginScreen onLogin={handleLogin} validateCredentials={validateCredentials} />;
+  }
+
+  if (currentView === 'profile' && currentUser) {
+    return (
+      <ProfileScreen
+        currentUser={currentUser}
+        currentPassword={users[currentUser]?.password || ''}
+        currentProfileImageUrl={users[currentUser]?.profileImageUrl || null}
+        onChangePassword={handleChangePassword}
+        onChangeProfileImage={handleChangeProfileImage}
+        onNavigateToChat={navigateToChat}
+      />
+    );
+  }
+  
+  if (currentView === 'chat' && currentUser) {
+    return (
+      <ChatRoom
+        currentUser={currentUser}
+        usersData={users}
+        messages={messages}
+        onSendMessage={handleSendMessage}
+        onLogout={handleLogout}
+        onNavigateToProfile={navigateToProfile}
+        onDeleteMessage={handleDeleteMessage} 
+      />
+    );
+  }
+  
+  return <LoginScreen onLogin={handleLogin} validateCredentials={validateCredentials} />;
+};
+
+
+// From index.tsx
+import ReactDOM from 'react-dom/client';
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
+}
+
+const root = ReactDOM.createRoot(rootElement);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+    </script>
+  </body>
+</html>
